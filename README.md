@@ -1,60 +1,104 @@
-# 🚚 Yukam DRighi - Plataforma VaNessa Mudança
+# 🏗️ Yukam Drighi - Monorepo VaNessa Mudança
 
-  Monorepo contendo todos os microserviços da plataforma VaNessa Mudança.
+Monorepo contendo todos os microserviços e infraestrutura compartilhada do ecossistema **VaNessa Mudança**.
 
-  ## 📦 Microserviços
+---
 
-  - **cliente-core** - Gestão de clientes (PF/PJ)
-  - **vendas-core** - Gestão de vendas e propostas
-  - **storage-core** - Gestão de estoque e armazenagem
-  - **financeiro-core** - Pagamentos e garantias
-  - **logistica-core** - Coletas, entregas e tracking
-  - **produto-core** - Catálogo e avaliação técnica
+## ⚠️ FILOSOFIA: Microserviços INDEPENDENTES
 
-  ## 🏗️ Arquitetura
+Este monorepo segue a filosofia **"desenvolvimento isolado por padrão, integração quando necessário"**.
 
-  Ver [docs/architecture/SYSTEM_ARCHITECTURE.md](docs/architecture/SYSTEM_ARCHITECTURE.md)
+### 95% do Tempo: Trabalhando em 1 Microserviço
 
-  ## 🚀 Quick Start
+**Você trabalha DENTRO do microserviço:**
 
-  ```bash
-  # Setup completo (todos os microserviços)
-  ./scripts/setup-all.sh
+```bash
+# 1. Entre no microserviço
+cd services/cliente-core
 
-  # Iniciar todos os serviços
-  ./scripts/start-all.sh
+# 2. Valide o ambiente
+./validate-dev-environment.sh
 
-  # Parar todos os serviços
-  ./scripts/stop-all.sh
+# 3. Desenvolva normalmente
+```
 
-  📚 Documentação
+**Por quê?**
+- ✅ **Rápido:** Setup em 3 minutos
+- ✅ **Focado:** Trabalhe em 1 MS sem distrações
+- ✅ **Leve:** Apenas 1 PostgreSQL rodando
+- ✅ **Independente:** MS pode ser clonado separadamente
 
-  - docs/development/GETTING_STARTED.md
-  - docs/development/LOCAL_DEVELOPMENT.md
-  - docs/api/API_CONTRACTS.md
-  - docs/architecture/DEPLOYMENT.md
+### 5% do Tempo: Testando Integrações
 
-  🔧 Estrutura
+```bash
+# Raiz do monorepo
+docker-compose up -d kafka
 
-  yukam-drighi-vn-mudanca/
-  ├── services/          # Microserviços (Git Submodules)
-  ├── infrastructure/    # IaC (Terraform, K8s)
-  ├── shared/           # Bibliotecas compartilhadas
-  ├── scripts/          # Automação
-  └── docs/             # Documentação
+# Inicie MSs manualmente
+cd services/cliente-core && mvn spring-boot:run &
+cd services/vendas-core && mvn spring-boot:run &
+```
 
-  📋 Convenções
+---
 
-  - Java 21 + Spring Boot 3.5+
-  - PostgreSQL 16 (1 DB por microserviço)
-  - Kafka para eventos assíncronos
-  - Redis para cache distribuído
-  - Docker + Kubernetes para deploy
+## 📦 Microserviços
 
-  🤝 Contributing
+| Microserviço | Porta | Database | Status | Descrição |
+|-------------|-------|----------|--------|-----------|
+| **[cliente-core](services/cliente-core/)** | 8081 | PostgreSQL:5432 | ✅ Ativo | Gestão de clientes (PF/PJ) |
+| **vendas-core** | 8082 | PostgreSQL:5433 | 🚧 Planejado | Gestão de vendas e propostas |
+| **storage-core** | 8083 | PostgreSQL:5434 | 🚧 Planejado | Gestão de estoque |
 
-  Ver CONTRIBUTING.md
+---
 
-  ---
-  Última atualização: 2025-11-05
-  Versão: 1.0.0
+## 🚀 Quick Start
+
+```bash
+# 1. Clonar com submodules
+git clone --recurse-submodules https://github.com/diegorighi/yukam-drighi.git
+cd yukam-drighi
+
+# 2. Escolha seu microserviço
+cd services/cliente-core
+
+# 3. Execute o wizard
+./validate-dev-environment.sh
+```
+
+---
+
+## 🏗️ Estrutura
+
+```
+yukam-drighi/
+├── README.md                          # Este arquivo
+├── docker-compose.yml                 # Infra compartilhada OPCIONAL
+├── services/                          # Git Submodules
+│   └── cliente-core/
+│       ├── validate-dev-environment.sh # Wizard do MS
+│       └── docker-compose.yml          # APENAS PostgreSQL do MS
+├── docs/                              # Documentação centralizada
+├── infrastructure/                    # Terraform + K8s
+└── shared/                            # Prometheus + Grafana configs
+```
+
+---
+
+## 📚 Documentação
+
+- [Getting Started](docs/development/GETTING_STARTED.md)
+- [Monorepo Workflow](docs/development/MONOREPO_WORKFLOW.md)
+- [Integration Map](docs/architecture/INTEGRATION_MAP.md)
+
+---
+
+## 🚫 O Que NÃO Fazer
+
+❌ **NUNCA use `docker-compose up` na raiz para desenvolvimento diário**
+❌ **NUNCA coloque PostgreSQL no docker-compose.yml da raiz**
+❌ **NUNCA rode wizard da raiz** - Use o wizard do MS
+
+---
+
+**Última atualização:** 2025-11-05
+**Versão:** 1.0.0 (Monorepo Minimalista)

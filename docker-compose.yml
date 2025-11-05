@@ -1,109 +1,187 @@
-  version: '3.8'
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Docker Compose - Infraestrutura Compartilhada (OPCIONAL)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# ⚠️ ATENÇÃO: NÃO use este compose para desenvolvimento diário!
+#
+# Este compose é APENAS para testes de INTEGRAÇÃO entre múltiplos microserviços.
+# Para desenvolver em UM microserviço, use o docker-compose.yml DELE.
+#
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 📚 FILOSOFIA DE DESENVOLVIMENTO
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# 95% do tempo (desenvolvimento isolado):
+#   cd services/cliente-core
+#   docker-compose up -d              # Sobe SÓ PostgreSQL do cliente-core
+#   ./validate-dev-environment.sh     # Valida ambiente
+#
+# 5% do tempo (testes de integração):
+#   cd ~/Desenvolvimento/yukam-drighi  # Raiz do monorepo
+#   docker-compose up -d kafka         # Sobe infra compartilhada
+#   cd services/cliente-core && mvn spring-boot:run &
+#   cd services/vendas-core && mvn spring-boot:run &
+#
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 🚀 SERVIÇOS INCLUÍDOS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# ✅ Kafka     - Eventos assíncronos entre microserviços
+# ✅ Redis     - Cache compartilhado (opcional, apenas em produção)
+# ✅ Prometheus - Agregação de métricas de todos os MS
+# ✅ Grafana   - Dashboards de observabilidade
+#
+# ❌ PostgreSQL - NUNCA! Cada MS tem seu próprio PostgreSQL no docker-compose.yml DELE
+#
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 📦 PORTAS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# Kafka:      localhost:9092
+# Redis:      localhost:6379
+# Prometheus: localhost:9090
+# Grafana:    localhost:3000 (admin/admin)
+#
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 🎯 EXEMPLOS DE USO
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# Subir apenas Kafka (eventos):
+#   docker-compose up -d kafka
+#
+# Subir Kafka + Redis:
+#   docker-compose up -d kafka redis
+#
+# Subir tudo (observabilidade completa):
+#   docker-compose up -d
+#
+# Ver logs do Kafka:
+#   docker-compose logs -f kafka
+#
+# Parar tudo:
+#   docker-compose down
+#
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  services:
-    # PostgreSQL para cliente-core
-    postgres-cliente:
-      image: postgres:16-alpine
-      container_name: mobilize-postgres-cliente
-      environment:
-        POSTGRES_DB: vanessa_mudanca_clientes
-        POSTGRES_USER: user
-        POSTGRES_PASSWORD: senha123
-      ports:
-        - "5432:5432"
-      volumes:
-        - postgres-cliente-data:/var/lib/postgresql/data
-      networks:
-        - mobilize-network
+version: '3.8'
 
-    # PostgreSQL para vendas-core
-    postgres-vendas:
-      image: postgres:16-alpine
-      container_name: mobilize-postgres-vendas
-      environment:
-        POSTGRES_DB: vanessa_mudanca_vendas
-        POSTGRES_USER: user
-        POSTGRES_PASSWORD: senha123
-      ports:
-        - "5433:5432"
-      volumes:
-        - postgres-vendas-data:/var/lib/postgresql/data
-      networks:
-        - mobilize-network
+services:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Apache Kafka - Event Streaming Platform
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  #
+  # Usado para comunicação assíncrona entre microserviços via eventos.
+  #
+  # Topics exemplo:
+  #   - cliente-events (ClientePFCriado, ClientePJCriado, ClienteAtualizado)
+  #   - venda-events (VendaConcluida, VendaCancelada)
+  #
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: yukam-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - yukam-network
 
-    # Kafka (para eventos assíncronos)
-    zookeeper:
-      image: confluentinc/cp-zookeeper:7.5.0
-      container_name: mobilize-zookeeper
-      environment:
-        ZOOKEEPER_CLIENT_PORT: 2181
-        ZOOKEEPER_TICK_TIME: 2000
-      networks:
-        - mobilize-network
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: yukam-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    networks:
+      - yukam-network
 
-    kafka:
-      image: confluentinc/cp-kafka:7.5.0
-      container_name: mobilize-kafka
-      depends_on:
-        - zookeeper
-      ports:
-        - "9092:9092"
-      environment:
-        KAFKA_BROKER_ID: 1
-        KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-        KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-        KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      networks:
-        - mobilize-network
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Redis - Cache Compartilhado (OPCIONAL)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  #
+  # Nota: Em desenvolvimento, cada MS usa cache local (Caffeine).
+  # Redis é usado APENAS em produção para cache distribuído.
+  #
+  redis:
+    image: redis:7-alpine
+    container_name: yukam-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - yukam-network
 
-    # Redis (cache compartilhado)
-    redis:
-      image: redis:7-alpine
-      container_name: mobilize-redis
-      ports:
-        - "6379:6379"
-      volumes:
-        - redis-data:/data
-      networks:
-        - mobilize-network
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Prometheus - Metrics Aggregation
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  #
+  # Coleta métricas de TODOS os microserviços via /actuator/prometheus
+  #
+  # Targets:
+  #   - cliente-core:  localhost:8081/actuator/prometheus
+  #   - vendas-core:   localhost:8082/actuator/prometheus
+  #   - storage-core:  localhost:8083/actuator/prometheus
+  #
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: yukam-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./shared/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    networks:
+      - yukam-network
 
-    # Prometheus (métricas)
-    prometheus:
-      image: prom/prometheus:v2.48.0
-      container_name: mobilize-prometheus
-      ports:
-        - "9090:9090"
-      volumes:
-        - ./shared/docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-        - prometheus-data:/prometheus
-      command:
-        - '--config.file=/etc/prometheus/prometheus.yml'
-        - '--storage.tsdb.path=/prometheus'
-      networks:
-        - mobilize-network
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Grafana - Observability Dashboards
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  #
+  # Dashboards pré-configurados:
+  #   - JVM Metrics (Heap, GC, Threads)
+  #   - HTTP Requests (Latency, Throughput, Errors)
+  #   - Database Metrics (HikariCP connections, query time)
+  #   - Cache Metrics (Hit rate, evictions)
+  #
+  # Acesso: http://localhost:3000
+  # Credenciais: admin / admin
+  #
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: yukam-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./shared/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./shared/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - yukam-network
 
-    # Grafana (dashboards)
-    grafana:
-      image: grafana/grafana:10.2.0
-      container_name: mobilize-grafana
-      ports:
-        - "3000:3000"
-      environment:
-        GF_SECURITY_ADMIN_PASSWORD: admin
-      volumes:
-        - grafana-data:/var/lib/grafana
-      depends_on:
-        - prometheus
-      networks:
-        - mobilize-network
+volumes:
+  redis-data:
+  prometheus-data:
+  grafana-data:
 
-  volumes:
-    postgres-cliente-data:
-    postgres-vendas-data:
-    redis-data:
-    prometheus-data:
-    grafana-data:
-
-  networks:
-    mobilize-network:
-      driver: bridge
+networks:
+  yukam-network:
+    driver: bridge
