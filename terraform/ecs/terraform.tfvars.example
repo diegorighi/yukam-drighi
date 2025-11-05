@@ -1,0 +1,35 @@
+# ============================================================================
+# Terraform Variables - ECS Infrastructure
+# ============================================================================
+# Copy this file to terraform.tfvars and fill in your values
+# ============================================================================
+
+# AWS Configuration
+aws_region  = "sa-east-1"
+environment = "prod"
+
+# VPC Configuration
+# Replace with your VPC ID (create VPC first or use existing one)
+vpc_id = "vpc-xxxxxxxxxxxxxxxxx"
+
+# Subnet IDs
+# Private subnets for ECS tasks (must have NAT Gateway for internet access)
+private_subnet_ids = [
+  "subnet-xxxxxxxxxxxxxxxxx",  # Private Subnet 1 (sa-east-1a)
+  "subnet-yyyyyyyyyyyyyyyyy"   # Private Subnet 2 (sa-east-1b)
+]
+
+# Public subnets for Application Load Balancer
+public_subnet_ids = [
+  "subnet-zzzzzzzzzzzzzzzzz",  # Public Subnet 1 (sa-east-1a)
+  "subnet-wwwwwwwwwwwwwwwww"   # Public Subnet 2 (sa-east-1b)
+]
+
+# Database Configuration
+# RDS endpoint (create RDS instance first)
+# Example: vanessa-mudanca-db.xxxxxxxxxx.sa-east-1.rds.amazonaws.com
+db_endpoint = "your-rds-endpoint.rds.amazonaws.com"
+
+# ARN of Secrets Manager secret containing DB password
+# Example: arn:aws:secretsmanager:sa-east-1:123456789012:secret:vanessa/db-password-xxxxxx
+db_password_secret_arn = "arn:aws:secretsmanager:sa-east-1:ACCOUNT_ID:secret:vanessa/db-password"

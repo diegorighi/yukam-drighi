@@ -1,0 +1,289 @@
+name: Deploy to Production (ECS)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Service to deploy (all, cliente-core, vendas-core)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - cliente-core
+          - vendas-core
+
+env:
+  AWS_REGION: sa-east-1
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.sa-east-1.amazonaws.com
+  ECS_CLUSTER: vanessa-mudanca-cluster
+  JAVA_VERSION: 21
+
+jobs:
+  # Job 1: Detectar quais serviços foram modificados
+  detect-changes:
+    name: Detect Service Changes
+    runs-on: ubuntu-latest
+    outputs:
+      cliente-core-changed: ${{ steps.changes.outputs.cliente-core }}
+      vendas-core-changed: ${{ steps.changes.outputs.vendas-core }}
+      deploy-all: ${{ steps.changes.outputs.deploy-all }}
+    steps:
+      - name: Checkout code with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 2  # Necessário para diff
+
+      - name: Detect changed services
+        id: changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SERVICE_INPUT: ${{ github.event.inputs.service }}
+        run: |
+          # Se workflow_dispatch com 'all', deploy tudo
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]] && [[ "$SERVICE_INPUT" == "all" ]]; then
+            echo "cliente-core=true" >> $GITHUB_OUTPUT
+            echo "vendas-core=true" >> $GITHUB_OUTPUT
+            echo "deploy-all=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Se workflow_dispatch com serviço específico
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "${SERVICE_INPUT}=true" >> $GITHUB_OUTPUT
+            echo "deploy-all=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Detectar mudanças via git diff (push)
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
+          # Verificar se cliente-core mudou
+          if echo "$CHANGED_FILES" | grep -q "^services/cliente-core/"; then
+            echo "cliente-core=true" >> $GITHUB_OUTPUT
+          else
+            echo "cliente-core=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Verificar se vendas-core mudou
+          if echo "$CHANGED_FILES" | grep -q "^services/vendas-core/"; then
+            echo "vendas-core=true" >> $GITHUB_OUTPUT
+          else
+            echo "vendas-core=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Verificar se docker-compose.yml ou infra mudou (deploy tudo)
+          if echo "$CHANGED_FILES" | grep -qE "(^docker-compose\.yml|^infrastructure/|^terraform/)"; then
+            echo "deploy-all=true" >> $GITHUB_OUTPUT
+          else
+            echo "deploy-all=false" >> $GITHUB_OUTPUT
+          fi
+
+  # Job 2: Build e Deploy do cliente-core
+  deploy-cliente-core:
+    name: Deploy cliente-core to ECS
+    needs: detect-changes
+    if: needs.detect-changes.outputs.cliente-core-changed == 'true' || needs.detect-changes.outputs.deploy-all == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout code with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build cliente-core JAR
+        working-directory: ./services/cliente-core
+        run: mvn clean package -DskipTests
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push Docker image to ECR
+        working-directory: ./services/cliente-core
+        env:
+          ECR_REPOSITORY: cliente-core
+          IMAGE_TAG: ${{ github.sha }}
+          ECR_REGISTRY_URL: ${{ env.ECR_REGISTRY }}
+        run: |
+          # Build da imagem Docker
+          docker build -t "$ECR_REPOSITORY:$IMAGE_TAG" .
+          docker tag "$ECR_REPOSITORY:$IMAGE_TAG" "$ECR_REGISTRY_URL/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker tag "$ECR_REPOSITORY:$IMAGE_TAG" "$ECR_REGISTRY_URL/$ECR_REPOSITORY:latest"
+
+          # Push para ECR
+          docker push "$ECR_REGISTRY_URL/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY_URL/$ECR_REPOSITORY:latest"
+
+      - name: Update ECS Task Definition
+        id: task-def
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          ECR_REGISTRY_URL: ${{ env.ECR_REGISTRY }}
+        run: |
+          # Baixar task definition atual
+          aws ecs describe-task-definition \
+            --task-definition cliente-core \
+            --query taskDefinition > task-definition.json
+
+          # Atualizar imagem na task definition
+          NEW_IMAGE="${ECR_REGISTRY_URL}/cliente-core:${IMAGE_TAG}"
+          jq --arg IMAGE "$NEW_IMAGE" \
+             '.containerDefinitions[0].image = $IMAGE' \
+             task-definition.json > new-task-definition.json
+
+          # Remover campos que não podem ser usados no register
+          jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+             new-task-definition.json > final-task-definition.json
+
+          cat final-task-definition.json
+
+      - name: Deploy to ECS
+        env:
+          CLUSTER_NAME: ${{ env.ECS_CLUSTER }}
+        run: |
+          # Registrar nova task definition
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://final-task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "New Task Definition: $NEW_TASK_DEF_ARN"
+
+          # Atualizar serviço ECS
+          aws ecs update-service \
+            --cluster "$CLUSTER_NAME" \
+            --service cliente-core-service \
+            --task-definition "$NEW_TASK_DEF_ARN" \
+            --force-new-deployment
+
+          # Aguardar deployment estabilizar (timeout 10 minutos)
+          echo "Aguardando deployment estabilizar..."
+          aws ecs wait services-stable \
+            --cluster "$CLUSTER_NAME" \
+            --services cliente-core-service
+
+      - name: Verify Deployment Health
+        env:
+          CLUSTER_NAME: ${{ env.ECS_CLUSTER }}
+        run: |
+          # Buscar URL do Load Balancer
+          ALB_DNS=$(aws ecs describe-services \
+            --cluster "$CLUSTER_NAME" \
+            --services cliente-core-service \
+            --query 'services[0].loadBalancers[0].targetGroupArn' \
+            --output text | xargs -I {} aws elbv2 describe-target-groups \
+            --target-group-arns {} \
+            --query 'TargetGroups[0].LoadBalancerArns[0]' \
+            --output text | xargs -I {} aws elbv2 describe-load-balancers \
+            --load-balancer-arns {} \
+            --query 'LoadBalancers[0].DNSName' \
+            --output text)
+
+          echo "Load Balancer DNS: $ALB_DNS"
+
+          # Health check (retry 5 vezes)
+          for i in {1..5}; do
+            echo "Health check attempt $i/5..."
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$ALB_DNS/api/clientes/actuator/health" || echo "000")
+
+            if [[ "$HTTP_CODE" == "200" ]]; then
+              echo "✅ Health check passed! Service is healthy."
+              exit 0
+            fi
+
+            echo "⚠️  Health check failed (HTTP $HTTP_CODE). Retrying in 30s..."
+            sleep 30
+          done
+
+          echo "❌ Health check failed after 5 attempts. Deployment may have issues."
+          exit 1
+
+      - name: Deployment Summary
+        if: success()
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          ECR_REGISTRY_URL: ${{ env.ECR_REGISTRY }}
+          CLUSTER_NAME: ${{ env.ECS_CLUSTER }}
+          REGION: ${{ env.AWS_REGION }}
+        run: |
+          echo "## 🚀 Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Service:** cliente-core" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** ${ECR_REGISTRY_URL}/cliente-core:${IMAGE_TAG}" >> $GITHUB_STEP_SUMMARY
+          echo "**Cluster:** ${CLUSTER_NAME}" >> $GITHUB_STEP_SUMMARY
+          echo "**Region:** ${REGION}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Health checks passed" >> $GITHUB_STEP_SUMMARY
+
+  # Job 3: Build e Deploy do vendas-core (futuro)
+  deploy-vendas-core:
+    name: Deploy vendas-core to ECS
+    needs: detect-changes
+    if: needs.detect-changes.outputs.vendas-core-changed == 'true' || needs.detect-changes.outputs.deploy-all == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Placeholder for vendas-core deployment
+        run: |
+          echo "vendas-core deployment will be implemented when the service is ready"
+          echo "This job ensures the workflow structure is prepared for multi-service deployment"
+
+  # Job 4: Notification (opcional)
+  notify:
+    name: Notify Deployment Status
+    needs: [deploy-cliente-core, deploy-vendas-core]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check deployment status
+        env:
+          CLIENTE_RESULT: ${{ needs.deploy-cliente-core.result }}
+          VENDAS_RESULT: ${{ needs.deploy-vendas-core.result }}
+        run: |
+          if [[ "$CLIENTE_RESULT" == "success" ]]; then
+            echo "✅ cliente-core deployed successfully"
+          elif [[ "$CLIENTE_RESULT" == "skipped" ]]; then
+            echo "⏭️  cliente-core deployment skipped (no changes)"
+          else
+            echo "❌ cliente-core deployment failed"
+          fi
+
+          if [[ "$VENDAS_RESULT" == "success" ]]; then
+            echo "✅ vendas-core deployed successfully"
+          elif [[ "$VENDAS_RESULT" == "skipped" ]]; then
+            echo "⏭️  vendas-core deployment skipped (no changes)"
+          else
+            echo "❌ vendas-core deployment failed"
+          fi
+
+      # Futuro: integrar com Slack, Discord, ou SNS
+      # - name: Send Slack notification
+      #   uses: slackapi/slack-github-action@v1
+      #   with:
+      #     webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+      #     payload: |
+      #       {
+      #         "text": "Deployment completed"
+      #       }

@@ -53,6 +53,8 @@ cd services/vendas-core && mvn spring-boot:run &
 
 ## 🚀 Quick Start
 
+### Desenvolvimento Local
+
 ```bash
 # 1. Clonar com submodules
 git clone --recurse-submodules https://github.com/diegorighi/yukam-drighi.git
@@ -64,6 +66,23 @@ cd services/cliente-core
 # 3. Execute o wizard
 ./validate-dev-environment.sh
 ```
+
+### CI/CD (Deploy Automático)
+
+```bash
+# Verificar status da implementação CI/CD
+./scripts/check-cicd-status.sh
+
+# Seguir guia de setup (< 30 min)
+# Ver: GETTING_STARTED_CICD.md
+```
+
+**Recursos CI/CD:**
+- ✅ GitHub Actions workflows (CI + CD)
+- ✅ Deploy automático para AWS ECS
+- ✅ Terraform para infraestrutura
+- ✅ Health checks automáticos
+- 📄 **Guia:** `GETTING_STARTED_CICD.md`
 
 ---
 
