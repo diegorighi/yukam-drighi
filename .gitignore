@@ -43,3 +43,4 @@
   *.env
   secrets/
   credentials/
+COGNITO_CREDENTIALS.md
