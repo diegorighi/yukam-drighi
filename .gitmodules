@@ -1,0 +1,3 @@
+[submodule "services/cliente-core"]
+	path = services/cliente-core
+	url = https://github.com/diegorighi/cliente-core.git
