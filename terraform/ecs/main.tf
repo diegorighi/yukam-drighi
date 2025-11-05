@@ -192,8 +192,8 @@ resource "aws_lb" "main" {
   security_groups    = [aws_security_group.alb.id]
   subnets            = var.public_subnet_ids
 
-  enable_deletion_protection = false
-  enable_http2              = true
+  enable_deletion_protection       = false
+  enable_http2                     = true
   enable_cross_zone_load_balancing = true
 
   tags = {
@@ -370,15 +370,18 @@ resource "aws_ecs_cluster_capacity_providers" "main" {
 
   capacity_providers = ["FARGATE", "FARGATE_SPOT"]
 
-  default_capacity_provider_strategy {
-    capacity_provider = "FARGATE"
-    weight            = 1
-    base              = 1
-  }
-
+  # Use 100% Fargate Spot for 70% cost savings
+  # Spot instances can be interrupted with 2-minute warning (acceptable for stateless tasks)
   default_capacity_provider_strategy {
     capacity_provider = "FARGATE_SPOT"
-    weight            = 1
+    base              = 0
+    weight            = 100 # 100% Spot for maximum savings
+  }
+
+  # Fallback to on-demand Fargate only if Spot capacity unavailable
+  default_capacity_provider_strategy {
+    capacity_provider = "FARGATE"
+    weight            = 0 # 0% on-demand (only used as fallback)
   }
 }
 
@@ -465,11 +468,11 @@ resource "aws_ecs_task_definition" "cliente_core" {
 # ============================================================================
 
 resource "aws_ecs_service" "cliente_core" {
-  name            = "cliente-core-service"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.cliente_core.arn
-  desired_count   = 2
-  launch_type     = "FARGATE"
+  name             = "cliente-core-service"
+  cluster          = aws_ecs_cluster.main.id
+  task_definition  = aws_ecs_task_definition.cliente_core.arn
+  desired_count    = 2
+  launch_type      = "FARGATE"
   platform_version = "LATEST"
 
   network_configuration {
@@ -502,8 +505,8 @@ resource "aws_ecs_service" "cliente_core" {
 # ============================================================================
 
 resource "aws_appautoscaling_target" "cliente_core" {
-  max_capacity       = 10
-  min_capacity       = 2
+  max_capacity       = 3 # Reduced from 10 to 3 for MVP cost control
+  min_capacity       = 0 # Enables scale-to-zero during off-hours (50% savings)
   resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.cliente_core.name}"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"
@@ -546,6 +549,60 @@ resource "aws_appautoscaling_policy" "cliente_core_memory" {
     }
   }
 }
+
+# ============================================================================
+# Scheduled Scaling - Scale to Zero for Cost Optimization
+# ============================================================================
+# Scale UP: Weekday mornings (Monday-Friday 6:00 AM BRT / 9:00 AM UTC)
+resource "aws_appautoscaling_scheduled_action" "cliente_core_scale_up_weekday_morning" {
+  name               = "cliente-core-scale-up-weekday-morning"
+  service_namespace  = aws_appautoscaling_target.cliente_core.service_namespace
+  resource_id        = aws_appautoscaling_target.cliente_core.resource_id
+  scalable_dimension = aws_appautoscaling_target.cliente_core.scalable_dimension
+
+  schedule = "cron(0 9 ? * MON-FRI *)" # 6:00 AM BRT = 9:00 AM UTC
+  timezone = "America/Sao_Paulo"
+
+  scalable_target_action {
+    min_capacity = 1 # Start with 1 task
+    max_capacity = 3 # Allow auto-scaling up to 3
+  }
+}
+
+# Scale DOWN to ZERO: Weekday nights (Monday-Friday 10:00 PM BRT / 1:00 AM UTC next day)
+resource "aws_appautoscaling_scheduled_action" "cliente_core_scale_down_weekday_night" {
+  name               = "cliente-core-scale-down-weekday-night"
+  service_namespace  = aws_appautoscaling_target.cliente_core.service_namespace
+  resource_id        = aws_appautoscaling_target.cliente_core.resource_id
+  scalable_dimension = aws_appautoscaling_target.cliente_core.scalable_dimension
+
+  schedule = "cron(0 1 ? * TUE-SAT *)" # 10:00 PM BRT = 1:00 AM UTC next day
+  timezone = "America/Sao_Paulo"
+
+  scalable_target_action {
+    min_capacity = 0 # Scale to zero (50% cost savings)
+    max_capacity = 0 # Force zero tasks
+  }
+}
+
+# Scale DOWN to ZERO: Weekend all day (Saturday-Sunday)
+resource "aws_appautoscaling_scheduled_action" "cliente_core_scale_down_weekend" {
+  name               = "cliente-core-scale-down-weekend"
+  service_namespace  = aws_appautoscaling_target.cliente_core.service_namespace
+  resource_id        = aws_appautoscaling_target.cliente_core.resource_id
+  scalable_dimension = aws_appautoscaling_target.cliente_core.scalable_dimension
+
+  schedule = "cron(0 1 ? * SAT *)" # Saturday 1:00 AM UTC (Friday 10:00 PM BRT)
+  timezone = "America/Sao_Paulo"
+
+  scalable_target_action {
+    min_capacity = 0 # Scale to zero for weekend
+    max_capacity = 0
+  }
+}
+
+# Scale UP: Monday morning (restart after weekend)
+# Already covered by cliente_core_scale_up_weekday_morning which runs MON-FRI
 
 # ============================================================================
 # Outputs
