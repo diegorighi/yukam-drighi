@@ -38,12 +38,35 @@
   *_override.tf
   *_override.tf.json
 
-  Secrets
+  Secrets and Credentials
 
+  # Environment files
   *.env
+  .env.*
+  .env.local
+  .env.cognito
+  .env.production
+
+  # Credential files
   secrets/
   credentials/
-COGNITO_CREDENTIALS.md
+  COGNITO_CREDENTIALS.md
+  **/client-secret*.txt
+  **/credentials.json
+  **/aws-credentials*.json
 
-# Cognito credentials (sensitive)
-.env.cognito
+  # OAuth2 / API Keys
+  **/*_CLIENT_ID*
+  **/*_CLIENT_SECRET*
+  **/*_API_KEY*
+  **/bearer-token*.txt
+
+  # AWS
+  **/.aws/credentials
+  **/aws-config*.json
+
+  # Sensitive docs
+  OAUTH2_PRODUCTION_READY.md
+  **/POSTMAN_WITH_CREDENTIALS.md
+terraform/shared/.terraform/
+terraform/**/.terraform/

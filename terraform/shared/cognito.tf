@@ -153,3 +153,88 @@ resource "aws_cognito_user_pool_domain" "main" {
   domain       = "${var.project_name}-auth-${var.environment}"
   user_pool_id = aws_cognito_user_pool.main.id
 }
+
+# ==============================================================================
+# Cognito Resource Server - cliente-core API
+# ==============================================================================
+
+resource "aws_cognito_resource_server" "cliente_core" {
+  identifier   = "cliente-core"
+  name         = "Cliente Core API"
+  user_pool_id = aws_cognito_user_pool.main.id
+
+  scope {
+    scope_name        = "read"
+    scope_description = "Read access to cliente-core API"
+  }
+
+  scope {
+    scope_name        = "write"
+    scope_description = "Write access to cliente-core API"
+  }
+}
+
+# ==============================================================================
+# Cognito App Client - M2M (venda-core → cliente-core)
+# ==============================================================================
+
+resource "aws_cognito_user_pool_client" "venda_core_m2m" {
+  name         = "venda-core-m2m"
+  user_pool_id = aws_cognito_user_pool.main.id
+
+  # Client Credentials Flow only (machine-to-machine)
+  generate_secret = true
+
+  explicit_auth_flows = []
+
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_flows                  = ["client_credentials"]
+
+  # Scopes: cliente-core/read and cliente-core/write
+  allowed_oauth_scopes = [
+    "${aws_cognito_resource_server.cliente_core.identifier}/read",
+    "${aws_cognito_resource_server.cliente_core.identifier}/write"
+  ]
+
+  # Token validity: 1 hour
+  access_token_validity = 1
+  token_validity_units {
+    access_token = "hours"
+  }
+
+  # Prevent user existence errors
+  prevent_user_existence_errors = "ENABLED"
+
+  lifecycle {
+    ignore_changes = [generate_secret]
+  }
+}
+
+# ==============================================================================
+# Secrets Manager - venda-core M2M Credentials
+# ==============================================================================
+
+resource "aws_secretsmanager_secret" "venda_core_m2m_credentials" {
+  name        = "venda-core/${var.environment}/cognito-m2m"
+  description = "Cognito M2M credentials for venda-core to authenticate with cliente-core"
+
+  tags = {
+    Name        = "venda-core-m2m-credentials"
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "venda_core_m2m_credentials" {
+  secret_id = aws_secretsmanager_secret.venda_core_m2m_credentials.id
+
+  secret_string = jsonencode({
+    client_id     = aws_cognito_user_pool_client.venda_core_m2m.id
+    client_secret = aws_cognito_user_pool_client.venda_core_m2m.client_secret
+    token_uri     = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${var.aws_region}.amazoncognito.com/oauth2/token"
+  })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}

@@ -1,123 +1,279 @@
-# 🏗️ Yukam Drighi - Monorepo VaNessa Mudança
+# Yukam/VaNessa Mudança - Monorepo
 
-Monorepo contendo todos os microserviços e infraestrutura compartilhada do ecossistema **VaNessa Mudança**.
+Monorepo containing all microservices and shared infrastructure for the VaNessa Mudança platform.
 
 ---
 
-## ⚠️ FILOSOFIA: Microserviços INDEPENDENTES
+## Quick Navigation
 
-Este monorepo segue a filosofia **"desenvolvimento isolado por padrão, integração quando necessário"**.
+### For AI/LLM Context
+→ **[PROJECT_CONTEXT.md](PROJECT_CONTEXT.md)** - Complete technical documentation for LLMs
 
-### 95% do Tempo: Trabalhando em 1 Microserviço
+### For Developers
+→ **[services/cliente-core/](services/cliente-core/)** - Customer management microservice
+→ **[docs/](docs/)** - Technical documentation
+→ **[terraform/](terraform/)** - Infrastructure as Code
+→ **[scripts/](scripts/)** - Utility scripts
 
-**Você trabalha DENTRO do microserviço:**
+---
 
-```bash
-# 1. Entre no microserviço
-cd services/cliente-core
+## Architecture Overview
 
-# 2. Valide o ambiente
-./validate-dev-environment.sh
+```
+Microservices Platform on AWS ECS Fargate
+├── cliente-core (port 8081) - Customer management (PF/PJ)
+├── venda-core (port 8082) - Sales management [Planned]
+└── storage-core (port 8083) - Inventory management [Planned]
 
-# 3. Desenvolva normalmente
+Shared Infrastructure:
+├── RDS PostgreSQL 16 (Multi-Schema)
+├── Application Load Balancer (path-based routing)
+├── AWS Cognito (OAuth2 authentication)
+└── VPC with Endpoints (no NAT Gateway)
 ```
 
-**Por quê?**
-- ✅ **Rápido:** Setup em 3 minutos
-- ✅ **Focado:** Trabalhe em 1 MS sem distrações
-- ✅ **Leve:** Apenas 1 PostgreSQL rodando
-- ✅ **Independente:** MS pode ser clonado separadamente
-
-### 5% do Tempo: Testando Integrações
-
-```bash
-# Raiz do monorepo
-docker-compose up -d kafka
-
-# Inicie MSs manualmente
-cd services/cliente-core && mvn spring-boot:run &
-cd services/vendas-core && mvn spring-boot:run &
-```
+**Key principles:**
+- Shared infrastructure, independent deployments
+- Cost optimization first (Fargate Spot, ARM Graviton, scale-to-zero)
+- OAuth2 JWT authentication
+- Automated CI/CD via GitHub Actions
 
 ---
 
-## 📦 Microserviços
+## Local Development
 
-| Microserviço | Porta | Database | Status | Descrição |
-|-------------|-------|----------|--------|-----------|
-| **[cliente-core](services/cliente-core/)** | 8081 | PostgreSQL:5432 | ✅ Ativo | Gestão de clientes (PF/PJ) |
-| **vendas-core** | 8082 | PostgreSQL:5433 | 🚧 Planejado | Gestão de vendas e propostas |
-| **storage-core** | 8083 | PostgreSQL:5434 | 🚧 Planejado | Gestão de estoque |
-
----
-
-## 🚀 Quick Start
-
-### Desenvolvimento Local
+### Quick Start
 
 ```bash
-# 1. Clonar com submodules
-git clone --recurse-submodules https://github.com/diegorighi/yukam-drighi.git
+# 1. Clone with submodules
+git clone --recurse-submodules <repo-url>
 cd yukam-drighi
 
-# 2. Escolha seu microserviço
+# 2. Start working on a microservice
 cd services/cliente-core
 
-# 3. Execute o wizard
-./validate-dev-environment.sh
+# 3. Run locally
+mvn spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
-### CI/CD (Deploy Automático)
-
-```bash
-# Verificar status da implementação CI/CD
-./scripts/check-cicd-status.sh
-
-# Seguir guia de setup (< 30 min)
-# Ver: GETTING_STARTED_CICD.md
-```
-
-**Recursos CI/CD:**
-- ✅ GitHub Actions workflows (CI + CD)
-- ✅ Deploy automático para AWS ECS
-- ✅ Terraform para infraestrutura
-- ✅ Health checks automáticos
-- 📄 **Guia:** `GETTING_STARTED_CICD.md`
+### Prerequisites
+- Java 21 (Temurin or OpenJDK)
+- Maven 3.9+
+- Docker Desktop
+- PostgreSQL 16 (or use Docker)
 
 ---
 
-## 🏗️ Estrutura
+## Infrastructure
+
+### Terraform Structure
+
+```
+terraform/
+├── main.tf              # Root module (orchestrates everything)
+├── shared/              # VPC, RDS, ALB, Cognito (provisioned once)
+└── modules/
+    └── ecs-service/     # Reusable ECS service module
+```
+
+### Deploy Infrastructure
+
+```bash
+cd terraform
+terraform init
+terraform plan
+terraform apply
+```
+
+### Add New Microservice
+
+```hcl
+# In terraform/main.tf
+module "new_service" {
+  source = "./modules/ecs-service"
+  service_name = "new-service"
+  alb_arn = module.shared.alb_arn
+  db_host = module.shared.rds_endpoint
+}
+```
+
+---
+
+## CI/CD
+
+### Automated Deployment
+
+Push to `main` branch triggers automated deployment to AWS ECS:
+
+```yaml
+1. Build JAR (mvn package)
+2. Build Docker image
+3. Push to Amazon ECR
+4. Update ECS task definition
+5. Deploy to ECS Fargate
+6. Health check validation
+```
+
+**Workflows:**
+- `.github/workflows/ci.yml` - PR validation (tests, coverage)
+- `.github/workflows/deploy-production.yml` - Production deployment
+
+**Path filtering:** Only changed services are deployed (monorepo pattern).
+
+### Required GitHub Secrets
+
+```bash
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_ACCOUNT_ID
+AWS_REGION=sa-east-1
+```
+
+---
+
+## Testing
+
+### Run Tests
+
+```bash
+cd services/cliente-core
+
+# Unit tests
+mvn test
+
+# With coverage
+mvn test jacoco:report
+open target/site/jacoco/index.html
+
+# Build without tests
+mvn package -DskipTests
+```
+
+**Current strategy (MVP):**
+- 245 unit tests (80%+ coverage)
+- Integration tests removed for velocity
+- Fast CI builds (~2 minutes)
+
+---
+
+## Authentication (OAuth2)
+
+### Get Credentials
+
+```bash
+# Automated script
+./scripts/get-cognito-credentials.sh
+
+# Manual via AWS CLI
+aws cognito-idp list-user-pools --max-results 10
+aws cognito-idp describe-user-pool-client --user-pool-id <id> --client-id <id>
+```
+
+### Get Access Token
+
+```bash
+# Using script
+./scripts/get-jwt-token.sh
+
+# Using cURL
+curl -X POST https://<cognito-domain>/oauth2/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -u "CLIENT_ID:CLIENT_SECRET" \
+  -d "grant_type=client_credentials&scope=cliente-core/read cliente-core/write"
+```
+
+### Use Token
+
+```bash
+TOKEN="<jwt-from-above>"
+curl -X GET <alb-url>/api/clientes/v1/clientes/pf \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## Documentation
+
+### Technical Documentation
+
+- **[PROJECT_CONTEXT.md](PROJECT_CONTEXT.md)** - Complete project context for LLMs
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - System architecture details
+- **[docs/CI_CD_IMPLEMENTATION_GUIDE.md](docs/CI_CD_IMPLEMENTATION_GUIDE.md)** - CI/CD setup guide
+- **[docs/COST_OPTIMIZATION.md](docs/COST_OPTIMIZATION.md)** - Cost optimization strategies
+
+### Service Documentation
+
+- **[services/cliente-core/README.md](services/cliente-core/README.md)** - Cliente Core service
+- **[services/cliente-core/CLAUDE.md](services/cliente-core/CLAUDE.md)** - Development guidelines
+
+---
+
+## Cost Optimization
+
+**Current monthly cost:** ~$67
+**Optimized cost:** ~$48 (with scale-to-zero)
+
+**Optimizations applied:**
+- Fargate Spot (70% discount)
+- ARM Graviton instances (20% cheaper)
+- Shared ALB ($20 vs $60 for 3 ALBs)
+- Shared RDS ($15 vs $45 for 3 RDS)
+- VPC Endpoints ($0 vs $32 NAT Gateway)
+
+---
+
+## Project Structure
 
 ```
 yukam-drighi/
-├── README.md                          # Este arquivo
-├── docker-compose.yml                 # Infra compartilhada OPCIONAL
-├── services/                          # Git Submodules
-│   └── cliente-core/
-│       ├── validate-dev-environment.sh # Wizard do MS
-│       └── docker-compose.yml          # APENAS PostgreSQL do MS
-├── docs/                              # Documentação centralizada
-├── infrastructure/                    # Terraform + K8s
-└── shared/                            # Prometheus + Grafana configs
+├── PROJECT_CONTEXT.md                 # LLM context documentation
+├── README.md                          # This file
+├── .github/workflows/                 # CI/CD pipelines
+├── services/                          # Microservices (git submodules)
+│   └── cliente-core/                 # Customer management service
+├── terraform/                         # Infrastructure as Code
+│   ├── main.tf                       # Root module
+│   ├── shared/                       # Shared resources (VPC, RDS, ALB)
+│   └── modules/ecs-service/          # Reusable ECS service module
+├── docs/                             # Technical documentation
+└── scripts/                          # Utility scripts
 ```
 
 ---
 
-## 📚 Documentação
+## Common Commands
 
-- [Getting Started](docs/development/GETTING_STARTED.md)
-- [Monorepo Workflow](docs/development/MONOREPO_WORKFLOW.md)
-- [Integration Map](docs/architecture/INTEGRATION_MAP.md)
+```bash
+# Terraform
+cd terraform && terraform apply
+
+# Local development
+cd services/cliente-core && mvn spring-boot:run
+
+# Run tests
+mvn test
+
+# Deploy (automated via GitHub Actions)
+git push origin main
+
+# View logs
+aws logs tail /ecs/cliente-core-prod --follow
+
+# Get Cognito credentials
+./scripts/get-cognito-credentials.sh
+```
 
 ---
 
-## 🚫 O Que NÃO Fazer
+## Support
 
-❌ **NUNCA use `docker-compose up` na raiz para desenvolvimento diário**
-❌ **NUNCA coloque PostgreSQL no docker-compose.yml da raiz**
-❌ **NUNCA rode wizard da raiz** - Use o wizard do MS
+For questions or issues:
+1. Check **[PROJECT_CONTEXT.md](PROJECT_CONTEXT.md)** for technical details
+2. Review service-specific README in `services/<service-name>/`
+3. Check CloudWatch Logs for runtime issues
+4. Review GitHub Actions for deployment issues
 
 ---
 
-**Última atualização:** 2025-11-05
-**Versão:** 1.0.0 (Monorepo Minimalista)
+**Last Updated:** 2025-11-06
+**Version:** 2.0.0
