@@ -206,7 +206,7 @@ jobs:
           # Health check (retry 5 vezes)
           for i in {1..5}; do
             echo "Health check attempt $i/5..."
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$ALB_DNS/api/clientes/actuator/health" || echo "000")
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$ALB_DNS/actuator/health" || echo "000")
 
             if [[ "$HTTP_CODE" == "200" ]]; then
               echo "✅ Health check passed! Service is healthy."
