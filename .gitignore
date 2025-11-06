@@ -44,3 +44,6 @@
   secrets/
   credentials/
 COGNITO_CREDENTIALS.md
+
+# Cognito credentials (sensitive)
+.env.cognito
