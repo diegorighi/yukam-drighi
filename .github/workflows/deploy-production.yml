@@ -174,7 +174,7 @@ jobs:
           # Atualizar serviço ECS
           aws ecs update-service \
             --cluster "$CLUSTER_NAME" \
-            --service cliente-core-service \
+            --service cliente-core-prod-service \
             --task-definition "$NEW_TASK_DEF_ARN" \
             --force-new-deployment
 
@@ -182,7 +182,7 @@ jobs:
           echo "Aguardando deployment estabilizar..."
           aws ecs wait services-stable \
             --cluster "$CLUSTER_NAME" \
-            --services cliente-core-service
+            --services cliente-core-prod-service
 
       - name: Verify Deployment Health
         env:
@@ -191,7 +191,7 @@ jobs:
           # Buscar URL do Load Balancer
           ALB_DNS=$(aws ecs describe-services \
             --cluster "$CLUSTER_NAME" \
-            --services cliente-core-service \
+            --services cliente-core-prod-service \
             --query 'services[0].loadBalancers[0].targetGroupArn' \
             --output text | xargs -I {} aws elbv2 describe-target-groups \
             --target-group-arns {} \
